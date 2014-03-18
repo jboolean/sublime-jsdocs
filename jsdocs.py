@@ -281,6 +281,10 @@ class JsdocsParser(object):
         if self.viewSettings.get('jsdocs_simple_mode'):
             return None
 
+        out = self.parseModule(line)
+        if (out):
+            return self.formatModule(out)
+
         out = self.parseFunction(line)  # (name, args, retval, options)
         if (out):
             return self.formatFunction(*out)
@@ -314,6 +318,12 @@ class JsdocsParser(object):
                 "}" if self.settings['curlyTypes'] else ""
             ))
 
+        return out
+
+    def formatModule(self, name):
+        out = []
+        out.append('${1:[%s description]}' % name)
+        out.append("@module ${2:%s}" % (escape(name)))
         return out
 
     def getTypeInfo(self, argType, argName):
@@ -362,6 +372,9 @@ class JsdocsParser(object):
                     typeInfo,
                     escape(argName)
                 ))
+
+        if name.find('_') == 0:
+            out.append('@${1:private}')
 
         # return value type might be already available in some languages but
         # even then ask language specific parser if it wants it listed
@@ -566,6 +579,14 @@ class JsdocsJavascript(JsdocsParser):
             "bool": "Boolean",
             "function": "Function"
         }
+
+    def parseModule(self, line):
+        expr = '(?:YUI\\.add\\(\\s*[\'"])(?P<name>[^\'"]*)[\'"]'
+        res = re.search(expr, line)
+        if not res:
+            return None
+
+        return res.group('name')
 
     def parseFunction(self, line):
         res = re.search(
