@@ -285,9 +285,17 @@ class JsdocsParser(object):
         if (out):
             return self.formatModule(out)
 
+        out = self.parseClass(line)
+        if (out):
+            return self.formatClass(*out)
+
         out = self.parseFunction(line)  # (name, args, retval, options)
         if (out):
             return self.formatFunction(*out)
+
+        out = self.parseAttr(line)
+        if (out):
+            return self.formatAttr(out)
 
         out = self.parseVar(line)
         if out:
@@ -324,6 +332,33 @@ class JsdocsParser(object):
         out = []
         out.append('${1:[%s description]}' % name)
         out.append("@module ${2:%s}" % (escape(name)))
+        return out
+
+    def formatAttr(self, name):
+        out = []
+        out.append('${1:[%s description]}' % name)
+        out.append('@attribute ${2:%s}' % (escape(name)))
+        out.append('@type {${3:%s}}' % escape(self.guessTypeFromName(name) or '[type]'))
+        return out
+
+    def formatClass(self, name, namespace, parent, mixins):
+        out = []
+        num = 1
+        out.append('${%d:[%s description]}' % (num, name))
+        num+=1
+        out.append('@class ${%d:%s}' % (num, name))
+        num+=1
+        if parent:
+            out.append('@extends ${%d:%s}' % (num, parent))
+            num+=1
+        if namespace:
+            out.append('@namespace ${%d:%s}' % (num, namespace))
+            num+=1
+        if mixins:
+            for mixin in mixins:
+                out.append('@uses ${%d:%s}' %(num, str(mixin)))
+                num+=1
+        out.append('@${%d:constructor}' % num)
         return out
 
     def getTypeInfo(self, argType, argName):
@@ -587,6 +622,107 @@ class JsdocsJavascript(JsdocsParser):
             return None
 
         return res.group('name')
+
+    def parseAttr(self, line):
+        expr = '(?:\s*)(?P<name>\w*):\s*{'
+        res = re.search(expr, line)
+        if not res:
+            return None
+
+        return res.group('name')
+
+    # def parseClass(self, line):
+    #     expr = '^(?:\\s*(var\\s+)?)(?P<fullname>[A-Za-z][\\w\\.]*)(?:\\s*=\\s*\\w+\\.Base\\.create\\([\'\"])(?P<internalName>[^\'\"]+)((?:[\'\"]\\s*,\\s*\\w+\\.)(?P<parent>[a-zA-Z][a-zA-Z0-9\\.]*)(?:\\s*,\\s*)(\\[(?P<mixins>[^\\]]*))?(?:\\]))?'
+    #     res = re.search(expr, line)
+    #     if not res:
+    #         return None
+
+    #     fullname = res.group('fullname') or None
+    #     name = res.group('internalName')
+    #     namespace = ''
+    #     if fullname:
+    #         exploded = str(fullname).split('.')
+    #         name = exploded[-1:][0]
+    #         print name
+    #         namespace = '.'.join(exploded[:-1])
+
+
+    #     mixinsStr = res.group('mixins')
+    #     mixins = None
+    #     if (mixinsStr):
+    #         mixins = [x.strip() for x in mixinsStr.split(',')]
+
+    #     parent = res.group('parent')
+
+    #     return (name, namespace, parent, mixins)
+
+    # parse YUI class - shouldn't interfere with regular js
+    def parseClass(self, line):
+        # allow for multiple assignment
+        assigns = line.split('=')
+
+        # scan a piece at a time as often the statement is broken into lines, could end anywhere
+        baseCreateAssignPos = 0
+
+        #search assignments for Base.create(...)
+        res = None
+        for i in range(len(assigns)):
+            res = re.search(
+               'Base\.create\([\'"](?P<internalName>[^\'"]*)[\'"]',
+                assigns[i])
+            if res:
+                baseCreateAssignPos = i
+                break
+
+        #must not be a class
+        if not res:
+            return None
+
+        print assigns[baseCreateAssignPos]
+        name = res.group('internalName')
+        restStr = assigns[baseCreateAssignPos][res.end(0):]
+
+        res = re.search(
+            ',\s*\w+\.(?P<parent>[\w\.]+)\s*,\s*(\[(?P<mixins>[^\]]*)\])?',
+            restStr)
+
+        parent = None
+        mixinsStr = None
+        if res:
+            parent = res.group('parent') or None
+            if parent == 'Base':
+                parent = None
+            mixinsStr = res.group('mixins') or None #string inside the []
+
+        mixins = []
+        if mixinsStr:
+            mixins = re.findall(r'((?<=\w\.)[\w.]*)', mixinsStr)
+
+        namespace = None
+        if len(assigns) > 1 and baseCreateAssignPos > 0:
+            intoVar = re.search(r'\s*(\S*)\s*$', assigns[baseCreateAssignPos - 1]) # variable name of last assignment (good guess for class name)
+            # e.g. Y.namespace('Namespace1').NameSpace2.ClassName
+            pathExploded = intoVar.group(0).split('.')
+            pathParsed = []
+            if len(pathExploded) > 1:
+                pathExploded = pathExploded[1:] # first element is probably YUI reference, toss it
+            for pathElement in pathExploded:
+                pathElement = pathElement.strip()
+                # if using YUI namespace, extract what's inside
+                res = re.search('(?:namespace\\(\\s*)[\'\"]([^\'\"]*)(?:[\'\"])', pathElement)
+                if res: # the case in which we extract from a namespcae
+                    pathParsed.append(res.group(1))
+                else:
+                    pathParsed.append(pathElement)
+
+            # get the namespace and the classname frome the dot.sytntax.path
+            if len(pathParsed) > 0:
+                if len(pathParsed) > 1:
+                    namespace = '.'.join(pathParsed[:-1])
+                name = pathParsed[-1:][0]
+
+
+        return (name, namespace, parent, mixins)
 
     def parseFunction(self, line):
         res = re.search(
