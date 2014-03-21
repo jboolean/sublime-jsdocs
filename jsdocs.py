@@ -338,7 +338,7 @@ class JsdocsParser(object):
         out = []
         out.append('${1:[%s description]}' % name)
         out.append('@attribute ${2:%s}' % (escape(name)))
-        out.append('@type {${3:%s}}' % escape(self.guessTypeFromName(name) or '[type]'))
+        out.append('@type ${3:%s}' % escape(self.guessTypeFromName(name) or '[type]'))
         return out
 
     def formatClass(self, name, namespace, parent, mixins):
@@ -381,7 +381,8 @@ class JsdocsParser(object):
         extraTagAfter = self.viewSettings.get("jsdocs_extra_tags_go_after") or False
 
         description = self.getNameOverride() or ('[%s%sdescription]' % (escape(name), ' ' if name else ''))
-        out.append("${1:%s}" % description)
+        if self.viewSettings.get("jsdocs_function_description") is not False:
+            out.append("${1:%s}" % description)
 
         if (self.viewSettings.get("jsdocs_autoadd_method_tag") is True):
             out.append("@%s %s" % (
@@ -409,7 +410,7 @@ class JsdocsParser(object):
                 ))
 
         if name.find('_') == 0:
-            out.append('@${1:private}')
+            out.append('@private')
 
         # return value type might be already available in some languages but
         # even then ask language specific parser if it wants it listed
@@ -631,32 +632,7 @@ class JsdocsJavascript(JsdocsParser):
 
         return res.group('name')
 
-    # def parseClass(self, line):
-    #     expr = '^(?:\\s*(var\\s+)?)(?P<fullname>[A-Za-z][\\w\\.]*)(?:\\s*=\\s*\\w+\\.Base\\.create\\([\'\"])(?P<internalName>[^\'\"]+)((?:[\'\"]\\s*,\\s*\\w+\\.)(?P<parent>[a-zA-Z][a-zA-Z0-9\\.]*)(?:\\s*,\\s*)(\\[(?P<mixins>[^\\]]*))?(?:\\]))?'
-    #     res = re.search(expr, line)
-    #     if not res:
-    #         return None
-
-    #     fullname = res.group('fullname') or None
-    #     name = res.group('internalName')
-    #     namespace = ''
-    #     if fullname:
-    #         exploded = str(fullname).split('.')
-    #         name = exploded[-1:][0]
-    #         print name
-    #         namespace = '.'.join(exploded[:-1])
-
-
-    #     mixinsStr = res.group('mixins')
-    #     mixins = None
-    #     if (mixinsStr):
-    #         mixins = [x.strip() for x in mixinsStr.split(',')]
-
-    #     parent = res.group('parent')
-
-    #     return (name, namespace, parent, mixins)
-
-    # parse YUI class - shouldn't interfere with regular js
+    # parse YUI class using Base.create - shouldn't interfere with regular js
     def parseClass(self, line):
         # allow for multiple assignment
         assigns = line.split('=')
@@ -678,7 +654,6 @@ class JsdocsJavascript(JsdocsParser):
         if not res:
             return None
 
-        print assigns[baseCreateAssignPos]
         name = res.group('internalName')
         restStr = assigns[baseCreateAssignPos][res.end(0):]
 
@@ -700,9 +675,9 @@ class JsdocsJavascript(JsdocsParser):
 
         namespace = None
         if len(assigns) > 1 and baseCreateAssignPos > 0:
-            intoVar = re.search(r'\s*(\S*)\s*$', assigns[baseCreateAssignPos - 1]) # variable name of last assignment (good guess for class name)
-            # e.g. Y.namespace('Namespace1').NameSpace2.ClassName
-            pathExploded = intoVar.group(0).split('.')
+            # e.g. Y.namespace('Namespace1').NameSpace2.ClassName (last variable name in multi assign is a good guess for class path)
+            # explode by dot
+            pathExploded = re.findall(r"((?:[^\.\"'\s]|\"[^\"]*\"|'[^']*')+)", assigns[baseCreateAssignPos - 1])
             pathParsed = []
             if len(pathExploded) > 1:
                 pathExploded = pathExploded[1:] # first element is probably YUI reference, toss it
@@ -718,8 +693,8 @@ class JsdocsJavascript(JsdocsParser):
             # get the namespace and the classname frome the dot.sytntax.path
             if len(pathParsed) > 0:
                 if len(pathParsed) > 1:
-                    namespace = '.'.join(pathParsed[:-1])
-                name = pathParsed[-1:][0]
+                    namespace = '.'.join(pathParsed[:-1]) #lose the first part - it's probably the YUI reference
+                name = pathParsed[len(pathParsed) - 1]
 
 
         return (name, namespace, parent, mixins)
